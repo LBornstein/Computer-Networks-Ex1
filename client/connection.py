@@ -7,6 +7,9 @@ with a user-facing message. Transport failures raise ``ConnectionError`` / ``OSE
 """
 from __future__ import annotations
 
+import json
+import struct
+
 from enum import Enum
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -45,14 +48,13 @@ class Connection:
     """
 
     def __init__(self):
-        # TODO implement this
-        pass
+        self._sock = None       # the TCP socket; set to None while not connected
+        self._recv_buf = b""    # bytes received after the last full message
 
     @property
     def connected(self) -> bool:
         """Returns True if a TCP connection to the server is currently open."""
-        # TODO implement this
-        pass
+        return self._sock is not None
 
     def connect(self, host: str, port: int) -> None:
         """Open a TCP connection to the bank server.
@@ -94,8 +96,11 @@ class Connection:
             RequestFailed: registration rejected (bad username/password, …).
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return "EXAMPLE_ID"
+        response = self._send_and_receive("REGISTER", {"name": user, "password": password})
+        user_id = response.get("data", {}).get("user_id")
+        if not isinstance(user_id, str) or not user_id:
+            raise RequestFailed("Server did not return a user id.")
+        return user_id
 
     def req_login(self, user: str, password: str, token: str) -> None:
         """Log in to an existing account on this connection.
@@ -112,8 +117,11 @@ class Connection:
             RequestFailed: wrong credentials / unknown user id.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        pass
+        response = self._send_and_receive("LOGIN", {"name": user, "password": password, "user_id": token})
+        balance = response.get("data", {}).get("balance")
+        if not isinstance(balance, str) or not balance:
+            raise RequestFailed("Server did not return a balance")
+        return balance
 
     def req_logout(self) -> None:
         """Log out and close the connection.
@@ -311,3 +319,75 @@ class Connection:
         """
         return [("2026-11-12 14:15:20", TxType.TRANSFER_OUT, "EXAMPLE_ID2", "EXAMPLE_NAME2", "100.00", "100.00", ""),
                 ("2026-11-12 14:13:20", TxType.DEPOSIT, "EXAMPLE_ID1", "EXAMPLE_NAME1", "200.00", "200.00", "")]
+
+
+    #Additional functions here:
+    @staticmethod
+    def build_request(action, data=None):
+        """Build a protocol request and return it as bytes (newline-terminated)."""
+        request = {
+            "action": action,
+            "data": data if data is not None else {}
+        }
+        return (json.dumps(request) + "\n").encode("utf-8")
+
+    def _send_msg(self, sock, msg: bytes) -> None:
+        """Send the whole message using send() in a loop.
+
+        send() may send only part of the bytes, so we keep sending the rest
+        until everything went out.
+        """
+        total_sent = 0
+        while total_sent < len(msg):
+            sent = sock.send(msg[total_sent:])
+            if sent == 0:
+                raise ConnectionError("Connection to the server was lost.")
+            total_sent += sent
+
+    def _recv_msg(self, sock) -> bytes:
+        """Receive one protocol message (everything up to the ``\\n``).
+
+        TCP is a stream, so one recv() may return half a message or more than one.
+        We concatenate recv() results into a buffer until a full line arrived,
+        and keep the leftover bytes for next time.
+        """
+        while b"\n" not in self._recv_buf:
+            data = sock.recv(1024)
+            if data == b"":  # empty bytes => the server closed the connection
+                raise ConnectionError("Server closed the connection.")
+            self._recv_buf += data
+        msg, self._recv_buf = self._recv_buf.split(b"\n", 1)
+        return msg
+
+    def _send_and_receive(self, action, data=None) -> dict:
+        """Send one request and return the parsed SUCCESS response.
+
+        Raises:
+            ConnectionError: not connected, or the connection failed.
+            ProtocolError: the reply is not a valid protocol message.
+            RequestFailed: the server answered with status ERROR.
+        """
+        if not self.connected:
+            raise ConnectionError("Not connected to the server.")
+        sock = self._sock
+
+        try:
+            self._send_msg(sock, self.build_request(action, data))
+            msg = self._recv_msg(sock)
+        except ConnectionError:
+            raise
+        except OSError as e:  # every socket function raises OSError on failure
+            raise ConnectionError(f"Connection error: {e}") from e
+
+        try:
+            response = json.loads(msg.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ProtocolError(f"Invalid response from server: {e}") from e
+        if not isinstance(response, dict) or "status" not in response:
+            raise ProtocolError("Response is missing a status field.")
+
+        if response["status"] != "SUCCESS":
+            raise RequestFailed(response.get("message") or "Request failed.")
+        if not isinstance(response.get("data", {}), dict):
+            raise ProtocolError("Response data is not an object.")
+        return response
