@@ -31,9 +31,9 @@
 
 ## פורמט השדות
 
-- **סכומי כסף** נשלחים כמחרוזת עם בדיוק שתי ספרות אחרי הנקודה, למשל `"500.00"` או `"-12.50"`, גם בבקשות וגם בתשובות. סכום בבקשה חייב להיות חיובי ועם לכל היותר שתי ספרות אחרי הנקודה.
-- **קוד זיהוי משתמש** (`user_id`, `target_id`) הוא מחרוזת של 10 תווים מתוך `A-Z0-9`, למשל `"AB12CD34EF"`.
-- **מספרי הוראות קבע והלוואות** (`order_id`, `loan_id`) הם מספרים שלמים חיוביים.
+- **סכומי כסף** נשלחים תמיד כמחרוזת. בתשובות של השרת יש בדיוק שתי ספרות אחרי הנקודה, למשל `"500.00"` או `"-12.50"`. בבקשות של הלקוח הסכום חייב להיות חיובי ועם לכל היותר שתי ספרות אחרי הנקודה, למשל `"100"`, `"99.9"` או `"99.90"`.
+- **קוד זיהוי משתמש** (`token`, `target`, `counterparty_token`) הוא מחרוזת של 10 תווים מתוך `A-Z0-9`, למשל `"AB12CD34EF"`.
+- **מספרי הוראות קבע והלוואות** (`so_id`, `loan_id`) הם מספרים שלמים חיוביים.
 - **תאריכים** נשלחים בפורמט `"YYYY-MM-DD"`, ו**זמנים** בפורמט `"YYYY-MM-DD HH:MM:SS"`, לפי הזמן המדומה של השרת.
 
 
@@ -43,15 +43,15 @@
 
 הפעולה `<ACTION_NAME>` יכולה להיות אחת מהפעולות הבאות. בכל פעולה מופיעה קודם הבקשה ואחריה התשובה במקרה של הצלחה.
 
-- `REGISTER` – פתיחת משתמש חדש. שם המשתמש הוא 3 עד 20 תווים מתוך אותיות, ספרות ו-`_`, והסיסמה לפחות 4 תווים. השרת מחזיר את קוד הזיהוי של המשתמש (`user_id`), מחרוזת ייחודית של 10 תווים מתוך `A-Z0-9`. שם המשתמש לא חייב להיות ייחודי, ולכן ההתחברות מתבצעת לפי קוד הזיהוי. ההרשמה לא מחברת את המשתמש.
+- `REGISTER` – פתיחת משתמש חדש. שם המשתמש הוא 3 עד 20 תווים מתוך אותיות, ספרות ו-`_`, והסיסמה לפחות 4 תווים. השרת מחזיר את קוד הזיהוי של המשתמש (`token`), מחרוזת ייחודית של 10 תווים מתוך `A-Z0-9`. שם המשתמש לא חייב להיות ייחודי, ולכן ההתחברות מתבצעת לפי קוד הזיהוי. ההרשמה לא מחברת את המשתמש.
   ```json
-  {"action": "REGISTER", "data": {"name": "User", "password": "1234"}}
-  {"status": "SUCCESS", "data": {"user_id": "AB12CD34EF"}}
+  {"action": "REGISTER", "data": {"user": "User", "password": "1234"}}
+  {"status": "SUCCESS", "data": {"token": "AB12CD34EF"}}
   ```
-- `LOGIN` – התחברות. הלקוח שולח את קוד הזיהוי והסיסמה, השרת בודק שהסיסמה מתאימה למשתמש עם קוד הזיהוי הזה ומחזיר את שם המשתמש.
+- `LOGIN` – התחברות. הלקוח שולח את קוד הזיהוי (`token`) והסיסמה, השרת בודק שהסיסמה מתאימה למשתמש עם קוד הזיהוי הזה ומחזיר את שם המשתמש (`user`).
   ```json
-  {"action": "LOGIN", "data": {"user_id": "AB12CD34EF", "password": "1234"}}
-  {"status": "SUCCESS", "data": {"name": "User"}}
+  {"action": "LOGIN", "data": {"token": "AB12CD34EF", "password": "1234"}}
+  {"status": "SUCCESS", "data": {"user": "User"}}
   ```
 - `LOGOUT` – התנתקות. אחרי התשובה הלקוח סוגר את החיבור. גם סגירת החיבור בלי `LOGOUT` מנתקת את המשתמש.
   ```json
@@ -63,9 +63,9 @@
   {"action": "GET_BALANCE", "data": {}}
   {"status": "SUCCESS", "data": {"balance": "1500.50"}}
   ```
-- `GET_HISTORY` – היסטוריית עו"ש, מהפעולה הישנה לחדשה. השדות `from_ts` ו-`to_ts` הם אופציונליים (זמן Unix בשניות, כולל הגבולות); אם הם חסרים או `null` מוחזרת כל ההיסטוריה.
+- `HISTORY` – היסטוריית עו"ש, מהפעולה הישנה לחדשה. השדות `from_ts` ו-`to_ts` הם אופציונליים (זמן Unix בשניות, כולל הגבולות); אם הם חסרים או `null` מוחזרת כל ההיסטוריה.
   ```json
-  {"action": "GET_HISTORY", "data": {"from_ts": null, "to_ts": null}}
+  {"action": "HISTORY", "data": {"from_ts": null, "to_ts": null}}
   {"status": "SUCCESS", "data": {"history": [
     {"time": "2026-11-12 14:13:20", "type": "DEPOSIT", "counterparty": "CASH", "counterparty_name": "CASH",
      "amount": "500.00", "balance": "500.00", "note": ""},
@@ -83,30 +83,30 @@
   ```
 - `TRANSFER` – העברה בנקאית חד פעמית למשתמש אחר. אסור להעביר לעצמך או למשתמש שלא קיים. השרת מחזיר את היתרה החדשה של השולח.
   ```json
-  {"action": "TRANSFER", "data": {"target_id": "XY98ZW76VU", "amount": "200.00"}}
+  {"action": "TRANSFER", "data": {"target": "XY98ZW76VU", "amount": "200.00"}}
   {"status": "SUCCESS", "data": {"new_balance": "300.00"}}
   ```
-- `STANDING_ORDER` – יצירת הוראת קבע חודשית. התשלום הראשון מתבצע היום, ואחריו פעם בחודש באותו יום בחודש (בחודש שאין בו את היום הזה, התשלום מתבצע ביום האחרון של החודש). `payments_limit` הוא מספר התשלומים; אם הוא `null` ההוראה פועלת עד שמבטלים אותה. השרת מחזיר את מספר ההוראה.
+- `SCHEDULE_SO` – יצירת הוראת קבע חודשית. התשלום הראשון מתבצע היום, ואחריו פעם בחודש באותו יום בחודש (בחודש שאין בו את היום הזה, התשלום מתבצע ביום האחרון של החודש). `count` הוא מספר התשלומים (מספר שלם); אם הוא `0` ההוראה פועלת עד שמבטלים אותה. השרת מחזיר את מספר ההוראה.
   ```json
-  {"action": "STANDING_ORDER", "data": {"target_id": "XY98ZW76VU", "amount": "100.00", "payments_limit": 5}}
-  {"status": "SUCCESS", "data": {"order_id": 1}}
+  {"action": "SCHEDULE_SO", "data": {"target": "XY98ZW76VU", "amount": "100.00", "count": 5}}
+  {"status": "SUCCESS", "data": {"so_id": 1}}
   ```
-- `GET_STANDING_ORDERS` – הצגת הוראות הקבע הפעילות שהמשתמש משלם (לא אלה שהוא מקבל). `executed` הוא מספר התשלומים שכבר בוצעו, `remaining` מספר התשלומים שנשארו (`null` אם עד ביטול), ו-`next_run` תאריך התשלום הבא.
+- `GET_SO_LIST` – הצגת הוראות הקבע הפעילות שהמשתמש משלם (לא אלה שהוא מקבל). `executed` הוא מספר התשלומים שכבר בוצעו, `remaining` מספר התשלומים שנשארו (`null` אם עד ביטול), ו-`next_run` תאריך התשלום הבא.
   ```json
-  {"action": "GET_STANDING_ORDERS", "data": {}}
-  {"status": "SUCCESS", "data": {"orders": [
-    {"order_id": 1, "target_id": "XY98ZW76VU", "target_name": "Dana", "amount": "100.00",
+  {"action": "GET_SO_LIST", "data": {}}
+  {"status": "SUCCESS", "data": {"so_list": [
+    {"so_id": 1, "counterparty_token": "XY98ZW76VU", "counterparty_name": "Dana", "amount": "100.00",
      "executed": 1, "remaining": 4, "next_run": "2026-12-12"}
   ]}}
   ```
-- `CANCEL_STANDING_ORDER` – ביטול הוראת קבע. אפשר לבטל רק הוראה שהמשתמש משלם.
+- `CANCEL_SO` – ביטול הוראת קבע. אפשר לבטל רק הוראה שהמשתמש משלם.
   ```json
-  {"action": "CANCEL_STANDING_ORDER", "data": {"order_id": 1}}
+  {"action": "CANCEL_SO", "data": {"so_id": 1}}
   {"status": "SUCCESS", "data": {}}
   ```
-- `TAKE_LOAN` – לקיחת הלוואה. השרת מאשר רק אם הלקוח לא במינוס. הסכום נכנס לחשבון מיד, ונגבה אוטומטית אחרי 30 יום עם ריבית של 5%. השרת מחזיר את מספר ההלוואה ואת היתרה החדשה.
+- `LOAN` – לקיחת הלוואה. השרת מאשר רק אם הלקוח לא במינוס. הסכום נכנס לחשבון מיד, ונגבה אוטומטית אחרי 30 יום עם ריבית של 5%. השרת מחזיר את מספר ההלוואה ואת היתרה החדשה.
   ```json
-  {"action": "TAKE_LOAN", "data": {"amount": "5000.00"}}
+  {"action": "LOAN", "data": {"amount": "5000.00"}}
   {"status": "SUCCESS", "data": {"loan_id": 1, "new_balance": "5500.00"}}
   ```
 - `GET_LOANS` – הצגת ההלוואות של המשתמש שעוד לא שולמו. לכל הלוואה מוחזרים תאריך הלקיחה (`taken_on`) והתאריך שבו היא תיגבה (`due_on`). `repay_amount` הוא הסכום שייגבה (הקרן ועוד 5%).
@@ -121,8 +121,8 @@
 ## דוגמת ריצה
 
 ```
-C -> S: {"action": "LOGIN", "data": {"user_id": "AB12CD34EF", "password": "abcd"}}
-S -> C: {"status": "SUCCESS", "data": {"name": "User"}}
+C -> S: {"action": "LOGIN", "data": {"token": "AB12CD34EF", "password": "abcd"}}
+S -> C: {"status": "SUCCESS", "data": {"user": "User"}}
 C -> S: {"action": "DEPOSIT", "data": {"amount": "1000.00"}}
 S -> C: {"status": "SUCCESS", "data": {"new_balance": "1000.00"}}
 C -> S: {"action": "WITHDRAW", "data": {"amount": "1500.00"}}
@@ -130,7 +130,7 @@ S -> C: {"status": "SUCCESS", "data": {"new_balance": "-500.00"}}
         (בשרת לוחצים Enter, עובר יום ונגבית ריבית של 0.05% על המינוס)
 C -> S: {"action": "GET_BALANCE", "data": {}}
 S -> C: {"status": "SUCCESS", "data": {"balance": "-500.25"}}
-C -> S: {"action": "TAKE_LOAN", "data": {"amount": "1000.00"}}
+C -> S: {"action": "LOAN", "data": {"amount": "1000.00"}}
 S -> C: {"status": "ERROR", "data": {}, "message": "Loans are not allowed while the balance is negative"}
 ```
 

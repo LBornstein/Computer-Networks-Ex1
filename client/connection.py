@@ -96,8 +96,8 @@ class Connection:
             RequestFailed: registration rejected (bad username/password, …).
             ConnectionError: connection lost.
         """
-        response = self._send_and_receive("REGISTER", {"name": user, "password": password})
-        user_id = response.get("data", {}).get("user_id")
+        response = self._send_and_receive("REGISTER", {"user": user, "password": password})
+        user_id = response.get("data", {}).get("token")
         if not isinstance(user_id, str) or not user_id:
             raise RequestFailed("Server did not return a user id.")
         return user_id
@@ -116,8 +116,8 @@ class Connection:
             RequestFailed: wrong credentials / unknown user id.
             ConnectionError: connection lost.
         """
-        response = self._send_and_receive("LOGIN", {"user_id": token, "password": password})
-        name = response.get("data", {}).get("name")
+        response = self._send_and_receive("LOGIN", {"token": token, "password": password})
+        name = response.get("data", {}).get("user")
         if not isinstance(name, str) or not name:
             raise RequestFailed("Server did not return the account name.")
         return name
@@ -160,8 +160,11 @@ class Connection:
             RequestFailed: invalid amount or not logged in.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return "0.00"
+        response = self._send_and_receive("DEPOSIT", { "amount": amount})
+        new_balance = response.get("data", {}).get("new_balance")
+        if not isinstance(new_balance , str) or not new_balance :
+            raise RequestFailed("Server did not return the new balance.")
+        return new_balance 
 
     def req_withdraw(self, amount: str) -> str:
         """Withdraw cash from the logged-in account (may go negative).
