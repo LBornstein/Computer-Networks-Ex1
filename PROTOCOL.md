@@ -48,10 +48,10 @@
   {"action": "REGISTER", "data": {"name": "User", "password": "1234"}}
   {"status": "SUCCESS", "data": {"user_id": "AB12CD34EF"}}
   ```
-- `LOGIN` – התחברות. הלקוח שולח את שם המשתמש, קוד הזיהוי והסיסמה, והשרת בודק שהשם והסיסמה מתאימים למשתמש עם קוד הזיהוי הזה.
+- `LOGIN` – התחברות. הלקוח שולח את קוד הזיהוי והסיסמה, השרת בודק שהסיסמה מתאימה למשתמש עם קוד הזיהוי הזה ומחזיר את שם המשתמש.
   ```json
-  {"action": "LOGIN", "data": {"name": "User", "user_id": "AB12CD34EF", "password": "1234"}}
-  {"status": "SUCCESS", "data": {}}
+  {"action": "LOGIN", "data": {"user_id": "AB12CD34EF", "password": "1234"}}
+  {"status": "SUCCESS", "data": {"name": "User"}}
   ```
 - `LOGOUT` – התנתקות. אחרי התשובה הלקוח סוגר את החיבור. גם סגירת החיבור בלי `LOGOUT` מנתקת את המשתמש.
   ```json
@@ -109,20 +109,20 @@
   {"action": "TAKE_LOAN", "data": {"amount": "5000.00"}}
   {"status": "SUCCESS", "data": {"loan_id": 1, "new_balance": "5500.00"}}
   ```
-- `GET_LOANS` – הצגת כל ההלוואות של המשתמש. `repay_amount` הוא הסכום שייגבה (הקרן ועוד 5%), ו-`paid` אומר אם ההלוואה כבר נגבתה.
+- `GET_LOANS` – הצגת ההלוואות של המשתמש שעוד לא שולמו. לכל הלוואה מוחזרים תאריך הלקיחה (`taken_on`) והתאריך שבו היא תיגבה (`due_on`). `repay_amount` הוא הסכום שייגבה (הקרן ועוד 5%).
   ```json
   {"action": "GET_LOANS", "data": {}}
   {"status": "SUCCESS", "data": {"loans": [
     {"loan_id": 1, "principal": "5000.00", "repay_amount": "5250.00",
-     "taken_on": "2026-11-12", "due_on": "2026-12-12", "paid": false}
+     "taken_on": "2026-11-12", "due_on": "2026-12-12"}
   ]}}
   ```
 
 ## דוגמת ריצה
 
 ```
-C -> S: {"action": "LOGIN", "data": {"name": "User", "user_id": "AB12CD34EF", "password": "abcd"}}
-S -> C: {"status": "SUCCESS", "data": {}}
+C -> S: {"action": "LOGIN", "data": {"user_id": "AB12CD34EF", "password": "abcd"}}
+S -> C: {"status": "SUCCESS", "data": {"name": "User"}}
 C -> S: {"action": "DEPOSIT", "data": {"amount": "1000.00"}}
 S -> C: {"status": "SUCCESS", "data": {"new_balance": "1000.00"}}
 C -> S: {"action": "WITHDRAW", "data": {"amount": "1500.00"}}

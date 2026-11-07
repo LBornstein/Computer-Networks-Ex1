@@ -102,26 +102,25 @@ class Connection:
             raise RequestFailed("Server did not return a user id.")
         return user_id
 
-    def req_login(self, user: str, password: str, token: str) -> None:
+    def req_login(self, token: str, password: str) -> str:
         """Log in to an existing account on this connection.
 
         Args:
-            user: Account name used at registration.
-            password: Account password.
             token: User id (account id) issued at registration.
+            password: Account password.
 
         Returns:
-            None on success.
+            The account name (username) for this user id.
 
         Raises:
             RequestFailed: wrong credentials / unknown user id.
             ConnectionError: connection lost.
         """
-        response = self._send_and_receive("LOGIN", {"name": user, "password": password, "user_id": token})
-        balance = response.get("data", {}).get("balance")
-        if not isinstance(balance, str) or not balance:
-            raise RequestFailed("Server did not return a balance")
-        return balance
+        response = self._send_and_receive("LOGIN", {"user_id": token, "password": password})
+        name = response.get("data", {}).get("name")
+        if not isinstance(name, str) or not name:
+            raise RequestFailed("Server did not return the account name.")
+        return name
 
     def req_logout(self) -> None:
         """Log out and close the connection.
@@ -142,8 +141,11 @@ class Connection:
             RequestFailed: not logged in or server error.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return "0.00"
+        response = self._send_and_receive("GET_BALANCE")
+        balance = response.get("data", {}).get("balance")
+        if not isinstance(balance, str) or not balance:
+            raise RequestFailed("Server did not return a balance.")
+        return balance
 
     def req_deposit(self, amount: str) -> str:
         """Deposit cash into the logged-in account.

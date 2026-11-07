@@ -21,7 +21,7 @@ import threading
 import time
 import tkinter as tk
 from decimal import Decimal, InvalidOperation
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 from typing import Callable, Optional, Tuple
 
 from connection import Connection, ProtocolError, RequestFailed, TxType
@@ -459,13 +459,9 @@ class BankApp(tk.Tk):
         return f"{self._server_key_prefix()}/id/{token}"
 
     def _remember_account(self, name: str, token: str) -> None:
-        """Remember both directions so login by user id can recover the account name."""
+        """Remember name↔token so the login form can be pre-filled after register."""
         save_token(self._name_to_token_key(name), token)
         save_token(self._token_to_name_key(token), name)
-
-    def _account_name_for_token(self, token: str) -> Optional[str]:
-        name = load_tokens().get(self._token_to_name_key(token), "")
-        return name or None
 
     def _report_success(self, success_text: str, label: Optional[ttk.Label] = None) -> None:
         self.set_status(success_text)
@@ -489,25 +485,11 @@ class BankApp(tk.Tk):
         if address is None or not self._require(token, password):
             return
 
-        # Protocol LOGIN still needs the account name; recover it from a prior register/login
-        # on this machine, or ask once if it is not remembered yet.
-        user = self._account_name_for_token(token)
-        if user is None:
-            user = tk.simpledialog.askstring(
-                "Account name",
-                "This user id is not remembered on this computer.\n"
-                "Enter the account name used when you registered:",
-                parent=self,
-            )
-            if not user or not user.strip():
-                return
-            user = user.strip()
-
         def task():
             self._ensure_connected(address)
-            self.connection.req_login(user, password, token)
+            return self.connection.req_login(token, password)
 
-        def done(_result: None):
+        def done(user: str):
             self.user = user
             self.account_token = token
             self.last_balance = None
