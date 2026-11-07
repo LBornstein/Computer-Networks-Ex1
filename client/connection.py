@@ -8,7 +8,7 @@ with a user-facing message. Transport failures raise ``ConnectionError`` / ``OSE
 from __future__ import annotations
 
 import json
-import struct
+import socket
 
 from enum import Enum
 from typing import Callable, List, Optional, Tuple, Union
@@ -70,8 +70,14 @@ class Connection:
         Raises:
             OSError / ConnectionError: if the server cannot be reached.
         """
-        # TODO implement this
-        pass
+        self.close() #close at the start incase there is already an open connection
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self._sock.connect((host, port))
+        except OSError:
+            self.close()  # connecting failed: free the socket so connected is False
+            raise         # let the GUI see the error
+        self._recv_buf = b"" #empty buffer
 
     def close(self) -> None:
         """Close the TCP connection if one is open. Safe to call more than once.
@@ -79,8 +85,13 @@ class Connection:
         Returns:
             None.
         """
-        # TODO implement this
-        pass
+        if self._sock is None:
+            return
+        try:
+            self._sock.close()
+        finally:
+            self._sock = None
+            self._recv_buf = b""
 
     def req_register(self, user: str, password: str) -> str:
         """Register a new account.
@@ -128,8 +139,10 @@ class Connection:
         Returns:
             None.
         """
-        # TODO implement this
-        pass
+        try:
+            self._send_and_receive("LOGOUT")
+        finally:
+            self.close()
 
     def req_get_balance(self) -> str:
         """Fetch the logged-in account's balance.
@@ -179,8 +192,12 @@ class Connection:
             RequestFailed: invalid amount or not logged in.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return "0.00"
+        response = self._send_and_receive("WITHDRAW", { "amount": amount})
+        new_balance = response.get("data", {}).get("new_balance")
+        if not isinstance(new_balance , str) or not new_balance :
+            raise RequestFailed("Server did not return the new balance.")
+        return new_balance 
+
 
     def req_transfer(self, target: str, amount: str) -> str:
         """Transfer money to another account.
@@ -196,8 +213,12 @@ class Connection:
             RequestFailed: bad amount, unknown target, self-transfer, …
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return "0.00"
+        response = self._send_and_receive("TRANSFER", {"target": target, "amount": amount})
+        new_balance = response.get("data", {}).get("new_balance")
+        if not isinstance(new_balance , str) or not new_balance :
+            raise RequestFailed("Server did not return the new balance.")
+        return new_balance
+
 
     def req_schedule_so(self, target: str, amount: str, count: str) -> int:
         """Create a monthly standing order (first payment today).
@@ -214,8 +235,16 @@ class Connection:
             RequestFailed: validation error or unknown target.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return 1
+        try:
+            count = int(count)
+        except (ValueError, TypeError):
+            raise RequestFailed("Invalid number of payments.")
+        response = self._send_and_receive("SCHEDULE_SO", {"target": target , "amount": amount , "count": count})
+        so_id = response.get("data", {}).get("so_id")
+        if not isinstance(so_id , int) or not so_id :
+            raise RequestFailed("Server did not return the standing order id.")
+        return so_id 
+
 
     def req_get_so_list(self) -> List[Tuple[int, str, str, str, int, Optional[int], str]]:
         """List active standing orders paid by the logged-in account.
@@ -238,9 +267,19 @@ class Connection:
             RequestFailed: not logged in or server error.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return [(1, "EXAMPLE_ID1", "EXAMPLE_NAME1", "0.00", 1, 2, "2026-11-12"),
-                (2, "EXAMPLE_ID2", "EXAMPLE_NAME2", "0.00", 4, None, "2026-11-20")]
+        response = self._send_and_receive("GET_SO_LIST")
+        items = response.get("data", {}).get("so_list", [])
+        if not isinstance(items, list):
+            raise ProtocolError("Server did not return a standing order list.")
+
+        result = []
+        try:
+            for so in items:
+                result.append((so["so_id"], so["counterparty_token"], so["counterparty_name"],
+                               so["amount"], so["executed"], so["remaining"], so["next_run"]))
+        except (KeyError, TypeError):
+            raise ProtocolError("Bad standing order in server reply.")
+        return result
 
     def req_cancel_so(self, so_id: Union[str, int]) -> None:
         """Cancel one of the logged-in account's standing orders.
@@ -255,8 +294,11 @@ class Connection:
             RequestFailed: unknown standing order or not owned by this account.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        pass
+        try:
+            so_id = int(so_id)
+        except (ValueError, TypeError):
+            raise RequestFailed("Invalid standing order id.")
+        self._send_and_receive("CANCEL_SO", {"so_id": so_id})
 
     def req_loan(self, amount: str) -> Tuple[int, str]:
         """Take a loan (principal credited now; auto-repay after 30 bank days + 5%).
@@ -272,8 +314,13 @@ class Connection:
             RequestFailed: invalid amount or not logged in.
             ConnectionError: connection lost.
         """
-        # TODO implement this
-        return (1, "0.00")
+        response = self._send_and_receive("LOAN", {"amount": amount})
+        data = response.get("data", {})
+        loan_id = data.get("loan_id")
+        new_balance = data.get("new_balance")
+        if not isinstance(loan_id, int) or not isinstance(new_balance, str) or not new_balance:
+            raise ProtocolError("Server did not return the loan id and new balance.")
+        return (loan_id, new_balance)
 
     def req_get_loans(self) -> List[Tuple[int, str, str, str, str]]:
         """List unpaid loans for the logged-in account.
@@ -293,8 +340,19 @@ class Connection:
             RequestFailed: not logged in or server error.
             ConnectionError: connection lost.
         """
-        return [(1, "100.00", "105.00", "2026-11-12", "2026-11-12"),
-                (2, "200.00", "210.00", "2026-11-20", "2026-11-20")]
+        response = self._send_and_receive("GET_LOANS")
+        items = response.get("data", {}).get("loans", [])
+        if not isinstance(items, list):
+            raise ProtocolError("Server did not return a loans list.")
+
+        result = []
+        try:
+            for item in items:
+                result.append((item["loan_id"], item["principal"], item["repay_amount"], item["taken_on"], item["due_on"]))
+        except (KeyError, TypeError):
+            raise ProtocolError("Bad loan in server reply.")
+        return result
+
 
     def req_history(self, from_ts: Optional[float] = None,
                     to_ts: Optional[float] = None) -> List[Tuple[str, TxType, str, str, str, str, str]]:
@@ -322,8 +380,19 @@ class Connection:
             RequestFailed: not logged in or bad timestamps.
             ConnectionError: connection lost.
         """
-        return [("2026-11-12 14:15:20", TxType.TRANSFER_OUT, "EXAMPLE_ID2", "EXAMPLE_NAME2", "100.00", "100.00", ""),
-                ("2026-11-12 14:13:20", TxType.DEPOSIT, "EXAMPLE_ID1", "EXAMPLE_NAME1", "200.00", "200.00", "")]
+        response = self._send_and_receive("HISTORY", {"from_ts": from_ts, "to_ts": to_ts})
+        items = response.get("data", {}).get("history", [])
+        if not isinstance(items, list):
+            raise ProtocolError("Server did not return a history list.")
+
+        result = []
+        try:
+            for item in items:
+                result.append((item["time"], TxType(item["type"]), item["counterparty"],
+                               item["counterparty_name"], item["amount"], item["balance"], item["note"]))
+        except (KeyError, TypeError, ValueError):
+            raise ProtocolError("Bad history entry in server reply.")
+        return result
 
 
     #Additional functions here:
