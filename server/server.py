@@ -3,18 +3,16 @@
 Usage:
     python server.py [--host 127.0.0.1] [--port 5050] [--start-date YYYY-MM-DD] [--verbose]
 """
+from __future__ import annotations
 
 import socket
 import select
 import json
-
-from __future__ import annotations
-
 import argparse
 import logging
 from datetime import date
 
-from bank import Bank
+from bank import Bank, parse_amount
 from server_utils import Console
 
 log = logging.getLogger("server")
@@ -84,7 +82,7 @@ class Server:
                 buffers.pop(sock, None)
                 sock.close()
 
-            self.console.poll()
+            self.console.poll(self.bank.on_console_line)
 
     def parse_request(self, data: bytes) -> tuple[str, dict]:
         decoded = data.decode("utf-8").strip()
@@ -155,7 +153,7 @@ class Server:
                     "data": {},
                     "message": f"Unknown action: {action}",
                 }
-        except ValueError as e:
+        except (ValueError, KeyError, TypeError) as e:
             response = {
                 "status": "ERROR",
                 "data": {},
@@ -164,7 +162,100 @@ class Server:
 
         client_sock.sendall((json.dumps(response) + "\n").encode("utf-8"))
 
-# still need to fix the responds according to the oop in bank.py
+    # ---------- request handlers: each one returns the response dict ----------
+
+    @staticmethod
+    def ok(data=None):
+        return {"status": "SUCCESS", "data": data if data is not None else {}}
+
+    @staticmethod
+    def money(x):
+        return f"{x:.2f}"
+
+    def handle_register(self, req_data):
+        token = self.bank.register(req_data.get("user"), req_data.get("password"))
+        return self.ok({"token": token})
+
+    def handle_login(self, req_data, client_sock):
+        token = req_data.get("token")
+        name = self.bank.login(token, req_data.get("password"))
+        self.clients[client_sock] = token  # remember who is logged in on this connection
+        return self.ok({"user": name})
+
+    def handle_get_balance(self, token):
+        return self.ok({"balance": self.money(self.bank.get_account(token).balance)})
+
+    def handle_history(self, token, req_data):
+        from_ts = req_data.get("from_ts")
+        to_ts = req_data.get("to_ts")
+        for ts in (from_ts, to_ts):
+            if ts is not None and not isinstance(ts, (int, float)):
+                raise ValueError("from_ts / to_ts must be numbers or null")
+
+        history = []
+        for t in self.bank.history(token, from_ts, to_ts):
+            history.append({
+                "time": self.bank.clock.format(when=t.ts),
+                "type": t.tx_type,
+                "counterparty": t.counterparty,
+                "counterparty_name": t.counterparty_name,
+                "amount": self.money(t.amount),
+                "balance": self.money(t.balance),
+                "note": t.note,
+            })
+        return self.ok({"history": history})
+
+    def handle_deposit(self, token, req_data):
+        new_balance = self.bank.deposit(token, parse_amount(req_data.get("amount")))
+        return self.ok({"new_balance": self.money(new_balance)})
+
+    def handle_withdraw(self, token, req_data):
+        new_balance = self.bank.withdraw(token, parse_amount(req_data.get("amount")))
+        return self.ok({"new_balance": self.money(new_balance)})
+
+    def handle_transfer(self, token, req_data):
+        amount = parse_amount(req_data.get("amount"))
+        new_balance = self.bank.transfer(token, req_data.get("target"), amount)
+        return self.ok({"new_balance": self.money(new_balance)})
+
+    def handle_schedule_so(self, token, req_data):
+        amount = parse_amount(req_data.get("amount"))
+        so_id = self.bank.schedule_so(token, req_data.get("target"), amount, req_data.get("count"))
+        return self.ok({"so_id": so_id})
+
+    def handle_get_so_list(self, token):
+        so_list = []
+        for so in self.bank.get_so_list(token):
+            so_list.append({
+                "so_id": so.so_id,
+                "counterparty_token": so.payee.token,
+                "counterparty_name": so.payee.name,
+                "amount": self.money(so.amount),
+                "executed": so.executed,
+                "remaining": so.remaining(),
+                "next_run": so.next_run.isoformat(),
+            })
+        return self.ok({"so_list": so_list})
+
+    def handle_cancel_so(self, token, req_data):
+        self.bank.cancel_so(token, req_data.get("so_id"))
+        return self.ok()
+
+    def handle_loan(self, token, req_data):
+        loan_id, new_balance = self.bank.take_loan(token, parse_amount(req_data.get("amount")))
+        return self.ok({"loan_id": loan_id, "new_balance": self.money(new_balance)})
+
+    def handle_get_loans(self, token):
+        loans = []
+        for loan in self.bank.get_loans(token):
+            loans.append({
+                "loan_id": loan.loan_id,
+                "principal": self.money(loan.principal),
+                "repay_amount": self.money(loan.repay_amount),
+                "taken_on": loan.taken_on.isoformat(),
+                "due_on": loan.due_on.isoformat(),
+            })
+        return self.ok({"loans": loans})
 
 
 ### Do not touch anything below this line. ###
